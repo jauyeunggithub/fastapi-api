@@ -6,10 +6,6 @@ echo === STEP 1: Building Docker containers ===
 docker-compose build
 
 echo.
-echo === STEP 2: Running database migrations ===
-docker-compose run --rm web alembic upgrade head
-
-echo.
 echo === STEP 3: Running tests ===
 docker-compose run --rm test
 

@@ -1,12 +1,12 @@
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
-import pytest
+import subprocess
 from fastapi.testclient import TestClient
 
 # Use SQLite file-based DB for tests instead of in-memory SQLite
-# Change to use file-based SQLite DB
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
 
 # Create the engine with the updated DB URL
@@ -29,20 +29,21 @@ def override_get_db():
     finally:
         db.close()
 
-# Fixture to create and drop all tables around each test function
+# Fixture to apply migrations and create/drop tables before/after tests
 
 
 @pytest.fixture(scope="function")
 def db_session():
-    # Create all tables before each test
-    Base.metadata.create_all(bind=engine)
+    # Apply the migration to the test database before each test
+    subprocess.run(["alembic", "upgrade", "head"])  # Run Alembic migrations
     session = TestingSessionLocal()
     try:
         yield session
     finally:
-        # Drop tables after each test to reset the DB
         session.close()
-        Base.metadata.drop_all(bind=engine)
+        # Drop tables after each test to reset the DB
+        # Revert to the initial state
+        subprocess.run(["alembic", "downgrade", "base"])
 
 # Fixture for the TestClient that uses the overridden get_db
 
