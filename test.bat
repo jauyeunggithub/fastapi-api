@@ -7,8 +7,7 @@ docker-compose build
 
 echo.
 echo === STEP 2: Running database migrations ===
-docker-compose run --rm web python -c "from app.models import Base; from app.database import engine; Base.metadata.create_all(bind=engine)"
-
+docker-compose run --rm web alembic upgrade head
 
 echo.
 echo === STEP 3: Running tests ===
