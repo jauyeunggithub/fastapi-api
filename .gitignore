@@ -1,0 +1,4 @@
+/app/__pycache__
+/app/tests/__pycache__
+/*.db
+/app/routes/__pycache__/*.pyc
