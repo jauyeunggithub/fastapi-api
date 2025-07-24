@@ -1,43 +1,117 @@
-def test_create_book(client):
-    r = client.post(
-        "/register", json={"username": "bob", "password": "password"})
-    assert r.status_code == 200
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+from alembic import command
+from alembic.config import Config
+import os
 
-    r = client.post("/login", json={"username": "bob", "password": "password"})
-    assert r.status_code == 200
-    token = r.json().get("access_token")
-    assert token is not None
-
-    headers = {"Authorization": f"Bearer {token}"}
-    r = client.post("/books", json={"title": "1984"}, headers=headers)
-    assert r.status_code == 200
-    assert r.json()["title"] == "1984"
+from app.main import app
+from app.database import get_db
 
 
-def test_create_book_unauthorized(client):
-    r = client.post("/books", json={"title": "Animal Farm"})
-    assert r.status_code == 401
+TEST_DB_URL = "sqlite:///./test.db"
 
 
-def test_create_book_invalid_token(client):
-    invalid_headers = {"Authorization": "Bearer invalid_token"}
-    r = client.post(
-        "/books", json={"title": "Brave New World"}, headers=invalid_headers)
-    assert r.status_code == 401
+def setup_test_db():
+    # Remove existing test.db before each test to start fresh
+    if os.path.exists("test.db"):
+        os.remove("test.db")
+
+    # Create a new SQLite engine pointing to the test file
+    engine = create_engine(TEST_DB_URL, connect_args={
+                           "check_same_thread": False})
+
+    # Create a connection to the engine
+    connection = engine.connect()
+
+    # Start a new transaction
+    transaction = connection.begin()
+
+    # Run Alembic migrations on the test database
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", TEST_DB_URL)
+    command.upgrade(alembic_cfg, "head")
+
+    # Create a session maker bound to the test engine
+    SessionLocal = sessionmaker(bind=engine)
+
+    # Override the get_db dependency to use this session
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    # Apply the override
+    app.dependency_overrides[get_db] = override_get_db
+
+    return connection, transaction
 
 
-def test_create_book_invalid_data(client):
-    r = client.post(
-        "/register", json={"username": "bob", "password": "password"})
-    assert r.status_code == 200
+def test_create_book():
+    connection, transaction = setup_test_db()
+    with TestClient(app) as client:
+        r = client.post(
+            "/register", json={"username": "bob", "password": "password"})
+        assert r.status_code == 200
 
-    r = client.post("/login", json={"username": "bob", "password": "password"})
-    assert r.status_code == 200
-    token = r.json().get("access_token")
-    assert token is not None
+        r = client.post(
+            "/login", json={"username": "bob", "password": "password"})
+        assert r.status_code == 200
+        token = r.json().get("access_token")
+        assert token is not None
 
-    headers = {"Authorization": f"Bearer {token}"}
-    r = client.post("/books", json={"title": ""},
-                    headers=headers)
-    assert r.status_code == 422
-    assert "detail" in r.json()
+        headers = {"Authorization": f"Bearer {token}"}
+        r = client.post("/books", json={"title": "1984"}, headers=headers)
+        assert r.status_code == 200
+        assert r.json()["title"] == "1984"
+
+    # Roll back and close the DB after test
+    transaction.rollback()
+    connection.close()
+
+
+def test_create_book_unauthorized():
+    connection, transaction = setup_test_db()
+    with TestClient(app) as client:
+        r = client.post("/books", json={"title": "Animal Farm"})
+        assert r.status_code == 401
+
+    transaction.rollback()
+    connection.close()
+
+
+def test_create_book_invalid_token():
+    connection, transaction = setup_test_db()
+    with TestClient(app) as client:
+        invalid_headers = {"Authorization": "Bearer invalid_token"}
+        r = client.post(
+            "/books", json={"title": "Brave New World"}, headers=invalid_headers)
+        assert r.status_code == 401
+
+    transaction.rollback()
+    connection.close()
+
+
+def test_create_book_invalid_data():
+    connection, transaction = setup_test_db()
+    with TestClient(app) as client:
+        r = client.post(
+            "/register", json={"username": "bob", "password": "password"})
+        assert r.status_code == 200
+
+        r = client.post(
+            "/login", json={"username": "bob", "password": "password"})
+        assert r.status_code == 200
+        token = r.json().get("access_token")
+        assert token is not None
+
+        headers = {"Authorization": f"Bearer {token}"}
+        r = client.post("/books", json={"title": ""}, headers=headers)
+        assert r.status_code == 422
+        assert "detail" in r.json()
+
+    transaction.rollback()
+    connection.close()
