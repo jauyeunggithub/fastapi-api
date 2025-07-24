@@ -5,3 +5,4 @@ pydantic[email]
 python-jose[cryptography]
 pytest
 httpx
+passlib[bcrypt]
